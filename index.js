@@ -1,88 +1,64 @@
 // api key: 6cbd1ccb
 
-const fetchData = async (searchTerm) => {
-  const response = await axios.get('http://www.omdbapi.com/', {
-    params: {
-      apikey: '6cbd1ccb',
-      s: searchTerm,
-    }
-  });
+// non-reusable code for our very specific project
+// fetchData() - function to find movies
+// renderOption() - function that knows how to render a movie
+// onOptionSelect() - function that gets invoked when a user clicks an option
+// root - element that the autocomplete should be rendered into 
 
-  if (response.data.Error) {
-    return [];
-  }
-
-  return response.data.Search;
-};
-
-const root = document.querySelector('.autocomplete');
-root.innerHTML = `
-  <label><b>Search For a Movie</b></label>
-  <input class="input" />
-  <div class="dropdown">
-    <div class="dropdown-menu">
-      <div class="dropdown-content results"></div>
-    </div>
-  </div>
-`;
-
-const input = document.querySelector('input');
-const dropdown = document.querySelector('.dropdown');
-const resultsWrapper = document.querySelector('.results');
-
-const onInput = debounce(async (e) => {
-  const movies = await fetchData(e.target.value);
-
-  //remove empty result container when no results
-  if (!movies.length) {
-    dropdown.classList.remove('is-active');
-    return;
-  }
-
-  //clear out previous search results
-  resultsWrapper.innerHTML = '';
-
-  // 'is-active' css class adds or closes drop-down
-  dropdown.classList.add('is-active');
-  for (let movie of movies) {
-    const option = document.createElement('a');
-
+const autoCompleteConfig = {
+  renderOption(movie) {
     //handle movies without poster
     const imgSrc = movie.Poster === 'N/A' ? '' : movie.Poster;
-
-    option.classList.add('dropdown-item');
-    option.innerHTML = `
+    return `
       <img src = "${imgSrc}" />
-      ${movie.Title}
-    `;
+      ${movie.Title} (${movie.Year})
+     `;
+  },
 
-    //handle movie selection
-    option.addEventListener('click', () => {
-      //when a movie is clicked, movie list disappears
-      dropdown.classList.remove('is-active');
+  inputValue(movie) {
+    return movie.Title;
+  },
 
-      //input value is updated to the title of our selection
-      input.value = movie.Title;
-
-      //render the selection
-      onMovieSelect(movie);
+  async fetchData(searchTerm) {
+    const response = await axios.get('http://www.omdbapi.com/', {
+      params: {
+        apikey: '6cbd1ccb',
+        s: searchTerm,
+      }
     });
 
-    resultsWrapper.appendChild(option);
-  }
-
-}, 500);
-
-input.addEventListener('input', onInput);
-
-document.addEventListener('click',
-  (e) => {
-    if (!root.contains(e.target)) {
-      dropdown.classList.remove('is-active');
+    if (response.data.Error) {
+      return [];
     }
-  });
 
-const onMovieSelect = async movie => {
+    return response.data.Search;
+  },
+
+};
+
+createAutoComplete({
+  ...autoCompleteConfig,
+  root: document.querySelector('#left-autocomplete'),
+  onOptionSelect(movie) {
+    document.querySelector('.tutorial').classList.add('is-hidden');
+    onMovieSelect(movie, document.querySelector('#left-summary'), 'left');
+  },
+});
+
+createAutoComplete({
+  ...autoCompleteConfig,
+  root: document.querySelector('#right-autocomplete'),
+  onOptionSelect(movie) {
+    document.querySelector('.tutorial').classList.add('is-hidden');
+    onMovieSelect(movie, document.querySelector('#right-summary'), 'right');
+  },
+});
+
+let leftMovie, rightMovie;
+
+// show movie listing
+const onMovieSelect = async (movie, summaryElement, side) => {
   const response = await axios.get('http://www.omdbapi.com/', {
     params: {
       apikey: '6cbd1ccb',
@@ -90,10 +66,56 @@ const onMovieSelect = async movie => {
     }
   });
 
-  document.querySelector('#summary').innerHTML = movieTemplate(response.data);
+  summaryElement.innerHTML = movieTemplate(response.data);
+
+  if (side === 'left') {
+    leftMovie = response.data;
+  } else {
+    rightMovie = response.data;
+  }
+
+  if (leftMovie && rightMovie) {
+    runComparison();
+  }
+};
+
+// comparing two movies
+const runComparison = () => {
+  const leftSideStats = document.querySelectorAll('#left-summary .notification');
+  const rightSideStats = document.querySelectorAll('#right-summary .notification');
+
+  leftSideStats.forEach((leftStat, idx) => {
+    const rightStat = rightSideStats[idx];
+    const leftSideValue = parseInt(leftStat.dataset.value);
+    const rightSideValue = parseInt(rightStat.dataset.value);
+
+    if (rightSideValue > leftSideValue) {
+      leftStat.classList.remove('is-primary');
+      leftStat.classList.add('is-warning');
+    } else {
+      rightStat.classList.remove('is-primary');
+      rightStat.classList.add('is-warning');
+    }
+  });
+
 };
 
 const movieTemplate = (movieDetail) => {
+  const dollars = parseFloat(movieDetail.BoxOffice.replace(/\$/g, '').replace(/,/g, ''));
+  const metascore = parseInt(movieDetail.Metascore);
+  const imdbRating = parseFloat(movieDetail.imdbRating);
+  const imdbVotes = parseInt(movieDetail.imdbVotes.replace(/,/g, ''));
+
+  //extract and add numbers from a string
+  const awards = movieDetail.Awards.split(' ').reduce((prev, word) => {
+    const value = parseInt(word);
+    if (isNaN(value)) {
+      return prev;
+    } else {
+      return prev + value;
+    }
+  }, 0);
+
   return `
     <article class="media">
       <figure class="media-left">
@@ -108,6 +130,27 @@ const movieTemplate = (movieDetail) => {
           <p>${movieDetail.Plot}</p>
         </div>
       </div>
+    </article>
+
+    <article data-value=${awards} class="notification is-primary">
+      <p class="title">${movieDetail.Awards}</p>
+      <p class="subtitle">Awards</p>
+    </article>
+    <article data-value=${dollars} class="notification is-primary">
+      <p class="title">${movieDetail.BoxOffice}</p>
+      <p class="subtitle">Box Office</p>
+    </article>
+    <article data-value=${metascore} class="notification is-primary">
+      <p class="title">${movieDetail.Metascore}</p>
+      <p class="subtitle">Metascore</p>
+    </article>
+    <article data-value=${imdbRating} class="notification is-primary">
+      <p class="title">${movieDetail.imdbRating}</p>
+      <p class="subtitle">IMDB Rating</p>
+    </article>
+    <article data-value=${imdbVotes} class="notification is-primary">
+      <p class="title">${movieDetail.imdbVotes}</p>
+      <p class="subtitle">IMDB Votes</p>
     </article>
   `;
 };
